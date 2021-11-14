@@ -1,5 +1,5 @@
-From: Adam the Rusty <sender>
-To: recipient
+From: Adam the Rusty <Adam@example.com>
+To: Adam@example2.com
 X-Secret-Header: This is a secret header
 Content-Type: text/plain
 Subject: Testing Email

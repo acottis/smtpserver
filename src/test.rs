@@ -1,10 +1,6 @@
 use super::*;
 use smtpclient::SmtpBuilder;
 
-// #[test]
-// fn test_listen(){
-//     main()
-// }
 
 #[test]
 fn recv_email(){
@@ -16,9 +12,9 @@ fn recv_email(){
     let smtp_client_builder = SmtpBuilder::new(
         ("127.0.0.1").into(), //host 
         ("25").into(), //port
-        ("sender").into(), //sender
-        ("recipient").into(), //recipient
-        ("domain").into() //domain
+        ("Adam@example.com").into(), //sender
+        ("Adam@example2.com").into(), //recipient
+        ("example.com").into() //domain
     );
     smtp_client_builder
         .subject("Testing Email".into())

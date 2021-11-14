@@ -112,7 +112,9 @@ fn save_email(data: Vec<u8>) -> Result<(), std::io::Error>{
 
 fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
 
-    let domain = 0;
+    let mut domain = String::new();
+    let mut sender = String::new();
+    let mut recipient = String::new();
     let mut bad_attempts = 0;
 
     // Inital connection
@@ -120,27 +122,48 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
         
     loop{
         let res_raw = read(&stream)?;
-        let res = String::from_utf8(res_raw).unwrap();
+        let res = String::from_utf8(res_raw).unwrap().to_lowercase();
 
         let cmd = SmtpCommand::lookup(res.as_ref());  
         match cmd {
-            SmtpCommand::Ehlo | SmtpCommand::Helo => {
-                write(&stream, SmtpStatusCodes::Ok, "".into())?;
+            SmtpCommand::Ehlo => {
+                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
+                let tmp = res.splitn(2, "ehlo").last().unwrap_or("");
+                domain = tmp.replace(&[' ', '\r','\n'][..], "");
+            }
+            SmtpCommand::Helo => {
+                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
+                let tmp = res.splitn(2, "helo").last().unwrap_or("");
+                domain = tmp.replace(&[' ', '\r','\n'][..], "");
             }
             SmtpCommand::MailFrom => {
                 write(&stream, SmtpStatusCodes::Ok, "".into())?;
+                let tmp = res.splitn(2, "mail from:").last().unwrap_or("\r\n");
+                sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             SmtpCommand::RcptTo => {
-                write(&stream, SmtpStatusCodes::Ok, "".into())?;
+                write(&stream, SmtpStatusCodes::Ok, "Ok\r\n".into())?;
+                let tmp = res.splitn(2, "rcpt to:").last().unwrap_or("");
+                recipient = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             SmtpCommand::Data => {
-                write(&stream, SmtpStatusCodes::StartingMailInput, "".into())?;
-                let data = read(&stream)?;
+                if sender == "" || domain == "" || recipient == "" {
+                    write(&stream, SmtpStatusCodes::BadCommandSequence, "EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
+                    continue;
+                }
+                write(&stream, SmtpStatusCodes::StartingMailInput, "Ok\r\n".into())?;
+                let mut data: Vec<u8> = Vec::new();
+                loop {
+                    let mut tmp = read(&stream)?;
+                    data.append(&mut tmp);
+                    // Checks for CLRF.CLRF
+                    if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { break }
+                }
                 save_email(data)?;
-                write(&stream, SmtpStatusCodes::Ok, "".into())?;
+                write(&stream, SmtpStatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             SmtpCommand::Quit => {
-                write(&stream, SmtpStatusCodes::ServiceClosed, "".into())?;
+                write(&stream, SmtpStatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
                 break;
             }
             _ => { 
@@ -148,13 +171,13 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
                 println!("{:?} found", cmd);
                 write(&stream, SmtpStatusCodes::CommandUnrecognised, format!("Command Unrecognised, Attempts Remaining: {}\r\n", (MAX_BAD_ATTEMTPS - bad_attempts)))?;
                 if bad_attempts > 3 { 
-                    &stream.shutdown(std::net::Shutdown::Both);
+                    let _ = &stream.shutdown(std::net::Shutdown::Both);
                     break;
                 }
             }
         }
     }
-
+    println!("Sender: {}, Domain: {}, Recipient: {}", sender, domain, recipient);
     Ok(())
 }
 
