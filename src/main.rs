@@ -2,7 +2,6 @@
 //! - Handle DATA msg with the . stop if it comes in mutiple parts
 //! - Better threading (limit)
 
-use std::thread;
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufReader, BufRead, Write};
 use smtpclient::SmtpStatusCodes;
@@ -16,6 +15,8 @@ use smtpclient::SmtpStatusCodes;
 // }
 static BIND_ADDRESS: &str = "127.0.0.1:25";
 static MAX_BAD_ATTEMTPS: u8 = 3;
+
+mod global;
 
 #[derive(Debug)]
 enum SmtpCommand{
@@ -45,27 +46,29 @@ impl SmtpCommand{
 }
 
 fn main() {
+
     listen().unwrap();
 }
+
 
 fn listen() -> Result<(), std::io::Error>{
 
     println!("Starting SMTP Server...");
     let listener = TcpListener::bind(BIND_ADDRESS)?;
    // listener.set_nonblocking(true).expect("Cannot set non-blocking"); Dont need this?
-
     println!("Listening on {}", listener.local_addr()?);
+
 
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                thread::spawn(|| -> Result<(), std::io::Error> {
+                std::thread::spawn(|| -> Result<(), std::io::Error> {
                     println!("Recieved connection from: {}", &s.peer_addr()?);
                     smtp_main(s)?;
                     Ok(())
                 });
             },
-            Err(e) => panic!("encountered IO error: {}", e),   
+            Err(e) => panic!("Encountered IO error: {}", e),   
         }
     }
     Ok(())
@@ -117,8 +120,10 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
     let mut recipient = String::new();
     let mut bad_attempts = 0;
 
+
+    let welcome = format!("MX1.ashdown.scot SMTP MAIL Service Ready [{}]\r\n", global::public_ip().lock().unwrap());
     // Inital connection
-    write(&stream, SmtpStatusCodes::ServiceReady,"MX1.ashdown.scot SMTP MAIL Service Ready\r\n".into())?;
+    write(&stream, SmtpStatusCodes::ServiceReady, welcome.into())?;
         
     loop{
         let res_raw = read(&stream)?;
@@ -160,6 +165,7 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
                     if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { break }
                 }
                 save_email(data)?;
+                println!("Sender: {}, Domain: {}, Recipient: {}", sender, domain, recipient);
                 write(&stream, SmtpStatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             SmtpCommand::Quit => {
@@ -176,8 +182,7 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
                 }
             }
         }
-    }
-    println!("Sender: {}, Domain: {}, Recipient: {}", sender, domain, recipient);
+    }  
     Ok(())
 }
 

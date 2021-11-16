@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 smtpclient =  {path = "../smtpclient" }
+regex = "1"
 
 [dev-dependencies]
