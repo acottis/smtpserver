@@ -1,9 +1,8 @@
 use super::*;
 use smtpclient::SmtpBuilder;
 
-
 #[test]
-fn recv_email(){
+fn recv_email_local(){
 
     std::thread::spawn(||{
         main(); 
@@ -12,8 +11,8 @@ fn recv_email(){
     let smtp_client_builder = SmtpBuilder::new(
         ("127.0.0.1").into(), //host 
         ("25").into(), //port
-        ("Adam@example.com").into(), //sender
-        ("Adam@example2.com").into(), //recipient
+        ("sender@example.com").into(), //sender
+        ("recipient@example2.com").into(), //recipient
         ("example.com").into() //domain
     );
     smtp_client_builder

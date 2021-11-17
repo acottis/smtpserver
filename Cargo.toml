@@ -10,3 +10,4 @@ smtpclient =  {path = "../smtpclient" }
 regex = "1"
 
 [dev-dependencies]
+aml = { git = "https://github.com/acottis/aml" }

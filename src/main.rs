@@ -1,22 +1,36 @@
+//!
+//! #Basic Usage:
+//! ```cargo run```
+//! This will start the web server listening on all interfaces on port 25 only
+//! 
 //! # TODO
-//! - Handle DATA msg with the . stop if it comes in mutiple parts
+//! - ~~Handle DATA msg with the . stop if it comes in mutiple parts~~
+//! - Implement port 587
+//! - Implement POP/IMAP
+//! - Send emails (Already have written just need logic to hook), Also need to impl AUTH for security, also bruteforce protection. Subnet allow list is probably best early protection
 //! - Better threading (limit)
+//! - config file with hostname and port options
+//! 
+
 
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufReader, BufRead, Write};
 use smtpclient::SmtpStatusCodes;
 
-// type Result<T> = std::result::Result<T, self::Error>;
+type Result<T> = std::result::Result<T, self::Error>;
 
-// #[derive(Debug)]
-// enum Error{
-//     IO(std::io::Error),
-//     UTF8(std::str::Utf8Error),
-// }
-static BIND_ADDRESS: &str = "127.0.0.1:25";
+static BIND_ADDRESS: &str = "0.0.0.0:25";
+static HOSTNAME: &str = ""; //mx1.domain.tld Will read this from config
 static MAX_BAD_ATTEMTPS: u8 = 3;
 
 mod global;
+
+#[derive(Debug)]
+enum Error{
+    IO(std::io::Error),
+    UTF8(std::string::FromUtf8Error),
+    SystemTime(std::time::SystemTimeError),
+}
 
 #[derive(Debug)]
 enum SmtpCommand{
@@ -51,19 +65,19 @@ fn main() {
 }
 
 
-fn listen() -> Result<(), std::io::Error>{
+fn listen() -> Result<()>{
 
     println!("Starting SMTP Server...");
-    let listener = TcpListener::bind(BIND_ADDRESS)?;
+    let listener = TcpListener::bind(BIND_ADDRESS).map_err(Error::IO)?;
    // listener.set_nonblocking(true).expect("Cannot set non-blocking"); Dont need this?
-    println!("Listening on {}", listener.local_addr()?);
+    println!("Listening on {}", listener.local_addr().map_err(Error::IO)?);
 
 
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
-                std::thread::spawn(|| -> Result<(), std::io::Error> {
-                    println!("Recieved connection from: {}", &s.peer_addr()?);
+                std::thread::spawn(|| -> Result<()> {
+                    println!("Recieved connection from: {}", &s.peer_addr().map_err(Error::IO)?);
                     smtp_main(s)?;
                     Ok(())
                 });
@@ -74,7 +88,7 @@ fn listen() -> Result<(), std::io::Error>{
     Ok(())
 }
 /// This function reads a TCP stream until a CLRF `[13, 10]` is sent then collects into a [Vec]
-fn read(stream: &TcpStream) -> Result<Vec<u8>, std::io::Error>{
+fn read(stream: &TcpStream) -> Result<Vec<u8>>{
     
     let mut reader = BufReader::new(stream);
     let mut data: Vec<u8> = vec![];
@@ -94,26 +108,29 @@ fn read(stream: &TcpStream) -> Result<Vec<u8>, std::io::Error>{
             _ => {}
         }      
     }
-    println!("Data from client: {:?}", data);
+    //println!("Data from client: {:?}", data);
     println!("{}", String::from_utf8_lossy(&data));
     Ok(data)
 }
 
-fn write(mut stream: &TcpStream, status: SmtpStatusCodes, msg: String) -> Result<(), std::io::Error> {
+fn write(mut stream: &TcpStream, status: SmtpStatusCodes, msg: String) -> Result<()> {
 
     let res = format!("{} {}", String::from(status), msg);
-    stream.write(res.as_bytes())?;
+    stream.write(res.as_bytes()).map_err(Error::IO)?;
 
     Ok(())
 }
 
-fn save_email(data: Vec<u8>) -> Result<(), std::io::Error>{
-    let mut file = std::fs::File::create("test.msg")?;
-    file.write(&data)?;
+// File name is time in seconds from EPOCH
+fn save_email(data: Vec<u8>) -> Result<()>{
+    let time = std::time::SystemTime::now();
+    let filename = format!("{:?}.eml", time.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(Error::SystemTime)?);
+    let mut file = std::fs::File::create(filename).map_err(Error::IO)?;
+    file.write(&data).map_err(Error::IO)?;
     Ok(())
 }  
 
-fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
+fn smtp_main(stream: TcpStream) -> Result<()>{
 
     let mut domain = String::new();
     let mut sender = String::new();
@@ -121,13 +138,13 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
     let mut bad_attempts = 0;
 
 
-    let welcome = format!("MX1.ashdown.scot SMTP MAIL Service Ready [{}]\r\n", global::public_ip().lock().unwrap());
+    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n",HOSTNAME, global::public_ip().lock().unwrap());
     // Inital connection
     write(&stream, SmtpStatusCodes::ServiceReady, welcome.into())?;
         
     loop{
         let res_raw = read(&stream)?;
-        let res = String::from_utf8(res_raw).unwrap().to_lowercase();
+        let res = String::from_utf8(res_raw).map_err(Error::UTF8)?.to_lowercase();
 
         let cmd = SmtpCommand::lookup(res.as_ref());  
         match cmd {
@@ -142,8 +159,8 @@ fn smtp_main(stream: TcpStream) -> Result<(), std::io::Error>{
                 domain = tmp.replace(&[' ', '\r','\n'][..], "");
             }
             SmtpCommand::MailFrom => {
-                write(&stream, SmtpStatusCodes::Ok, "".into())?;
-                let tmp = res.splitn(2, "mail from:").last().unwrap_or("\r\n");
+                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
+                let tmp = res.splitn(2, "mail from:").last().unwrap_or("");
                 sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             SmtpCommand::RcptTo => {

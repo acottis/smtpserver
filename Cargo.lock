@@ -12,6 +12,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "aml"
+version = "0.1.0"
+source = "git+https://github.com/acottis/aml#c7c1261d9fe88a0a60e08d20243778c8e2cc4f8e"
+
+[[package]]
 name = "autocfg"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -299,6 +304,7 @@ dependencies = [
 name = "smtpserver"
 version = "0.1.0"
 dependencies = [
+ "aml",
  "regex",
  "smtpclient",
 ]
