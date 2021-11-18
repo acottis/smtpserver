@@ -10,18 +10,19 @@
 //! - Send emails (Already have written just need logic to hook), Also need to impl AUTH for security, also bruteforce protection. Subnet allow list is probably best early protection
 //! - Better threading (limit)
 //! - config file with hostname and port options
+//! - Mail Size checking
 //! 
 
 
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufReader, BufRead, Write};
-use smtpclient::SmtpStatusCodes;
+use smtpclient::StatusCodes;
 
 type Result<T> = std::result::Result<T, self::Error>;
 
 static BIND_ADDRESS: &str = "0.0.0.0:25";
-static HOSTNAME: &str = ""; //mx1.domain.tld Will read this from config
-static MAX_BAD_ATTEMTPS: u8 = 3;
+static HOSTNAME: &str = "mx1.domain.tld"; //mx1.domain.tld Will read this from config
+static MAX_BAD_ATTEMPTS: u8 = 3;
 
 mod global;
 
@@ -37,6 +38,7 @@ enum SmtpCommand{
     Ehlo,
     Helo,
     AuthLogin,
+    AuthPlain,
     MailFrom,
     RcptTo,
     Data,
@@ -51,6 +53,7 @@ impl SmtpCommand{
         if text.starts_with("EHLO") { return Self::Ehlo }
         if text.starts_with("HELO") {  return Self::Helo }
         if text.starts_with("AUTH LOGIN") {  return Self::AuthLogin }
+        if text.starts_with("AUTH PLAIN") {  return Self::AuthPlain }
         if text.starts_with("MAIL FROM:") {  return Self::MailFrom }
         if text.starts_with("RCPT TO:") {  return Self::RcptTo }
         if text.starts_with("DATA") {  return Self::Data }
@@ -88,7 +91,7 @@ fn listen() -> Result<()>{
     Ok(())
 }
 /// This function reads a TCP stream until a CLRF `[13, 10]` is sent then collects into a [Vec]
-fn read(stream: &TcpStream) -> Result<Vec<u8>>{
+fn read<T>(stream: T) -> Result<Vec<u8>> where T: std::io::Read {
     
     let mut reader = BufReader::new(stream);
     let mut data: Vec<u8> = vec![];
@@ -113,9 +116,9 @@ fn read(stream: &TcpStream) -> Result<Vec<u8>>{
     Ok(data)
 }
 
-fn write(mut stream: &TcpStream, status: SmtpStatusCodes, msg: String) -> Result<()> {
+fn write(mut stream: &TcpStream, status: StatusCodes, msg: String) -> Result<()> {
 
-    let res = format!("{} {}", String::from(status), msg);
+    let res = format!("{}{}", String::from(status), msg);
     stream.write(res.as_bytes()).map_err(Error::IO)?;
 
     Ok(())
@@ -136,44 +139,58 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
     let mut sender = String::new();
     let mut recipient = String::new();
     let mut bad_attempts = 0;
+    let mut authenticated = false;
 
 
-    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n",HOSTNAME, global::public_ip().lock().unwrap());
+    let welcome = format!(" {} SMTP MAIL Service Ready [{}]\r\n", HOSTNAME, global::public_ip().lock().unwrap());
     // Inital connection
-    write(&stream, SmtpStatusCodes::ServiceReady, welcome.into())?;
+    write(&stream, StatusCodes::ServiceReady, welcome.into())?;
         
     loop{
         let res_raw = read(&stream)?;
-        let res = String::from_utf8(res_raw).map_err(Error::UTF8)?.to_lowercase();
+        let res = String::from_utf8(res_raw).map_err(Error::UTF8)?;
 
         let cmd = SmtpCommand::lookup(res.as_ref());  
         match cmd {
             SmtpCommand::Ehlo => {
-                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
                 let tmp = res.splitn(2, "ehlo").last().unwrap_or("");
                 domain = tmp.replace(&[' ', '\r','\n'][..], "");
+                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", domain).into())?;
             }
             SmtpCommand::Helo => {
-                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
                 let tmp = res.splitn(2, "helo").last().unwrap_or("");
                 domain = tmp.replace(&[' ', '\r','\n'][..], "");
+                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", domain).into())?;
+            }
+            SmtpCommand::AuthPlain => {
+                write(&stream, StatusCodes::AuthenticationSuceeded, "\r\n".into())?;
+                authenticated = true;
+            }
+            SmtpCommand::AuthLogin => {
+                write(&stream, StatusCodes::ServerChallenge, " VXNlcm5hbWU6\r\n".into())?;
+                let user = read(&stream);
+                write(&stream, StatusCodes::ServerChallenge, " UGFzc3dvcmQ6\r\n".into())?;
+                let pass = read(&stream);
+                write(&stream, StatusCodes::AuthenticationSuceeded, " 2.7.0 Authentication successful\r\n".into())?;
+                authenticated = true;
+
             }
             SmtpCommand::MailFrom => {
-                write(&stream, SmtpStatusCodes::Ok, "\r\n".into())?;
+                write(&stream, StatusCodes::Ok, "\r\n".into())?;
                 let tmp = res.splitn(2, "mail from:").last().unwrap_or("");
                 sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             SmtpCommand::RcptTo => {
-                write(&stream, SmtpStatusCodes::Ok, "Ok\r\n".into())?;
+                write(&stream, StatusCodes::Ok, " Ok\r\n".into())?;
                 let tmp = res.splitn(2, "rcpt to:").last().unwrap_or("");
                 recipient = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             SmtpCommand::Data => {
                 if sender == "" || domain == "" || recipient == "" {
-                    write(&stream, SmtpStatusCodes::BadCommandSequence, "EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
+                    write(&stream, StatusCodes::BadCommandSequence, " EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
                     continue;
                 }
-                write(&stream, SmtpStatusCodes::StartingMailInput, "Ok\r\n".into())?;
+                write(&stream, StatusCodes::StartingMailInput, " Ok\r\n".into())?;
                 let mut data: Vec<u8> = Vec::new();
                 loop {
                     let mut tmp = read(&stream)?;
@@ -183,22 +200,23 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 }
                 save_email(data)?;
                 println!("Sender: {}, Domain: {}, Recipient: {}", sender, domain, recipient);
-                write(&stream, SmtpStatusCodes::Ok, "Recieved Data\r\n".into())?;
+                write(&stream, StatusCodes::Ok, " Recieved Data\r\n".into())?;
             }
             SmtpCommand::Quit => {
-                write(&stream, SmtpStatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
+                write(&stream, StatusCodes::ServiceClosed, " Goodbye\r\n".into())?;
                 break;
             }
             _ => { 
                 bad_attempts += 1;
                 println!("{:?} found", cmd);
-                write(&stream, SmtpStatusCodes::CommandUnrecognised, format!("Command Unrecognised, Attempts Remaining: {}\r\n", (MAX_BAD_ATTEMTPS - bad_attempts)))?;
+                write(&stream, StatusCodes::CommandUnrecognised, format!("Command Unrecognised, Attempts Remaining: {}\r\n", (MAX_BAD_ATTEMPTS - bad_attempts)))?;
                 if bad_attempts > 3 { 
                     let _ = &stream.shutdown(std::net::Shutdown::Both);
                     break;
                 }
             }
         }
+        //std::thread::sleep(std::time::Duration::from_secs(1));
     }  
     Ok(())
 }
