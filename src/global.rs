@@ -3,6 +3,10 @@ use std::mem::MaybeUninit;
 use std::sync::{Mutex, Once};
 use std::io::prelude::{Write, Read};
 
+pub static BIND_ADDRESS: &str = "0.0.0.0:25";
+pub static HOSTNAME: &str = "mx1.domain.tld"; //mx1.domain.tld Will read this from config
+pub static MAX_BAD_ATTEMPTS: u8 = 3;
+
 pub fn public_ip() -> &'static Mutex<String> {
     // Create an uninitialized static
     static mut PUBLIC_IP: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();

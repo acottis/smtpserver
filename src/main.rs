@@ -12,75 +12,42 @@
 //! - config file with hostname and port options
 //! - Mail Size checking
 //! 
-
-
 use std::net::{TcpListener, TcpStream};
 use std::io::{BufReader, BufRead, Write};
 use smtpclient::StatusCodes;
 
-type Result<T> = std::result::Result<T, self::Error>;
+#[cfg(test)]
+mod test;
 
-static BIND_ADDRESS: &str = "0.0.0.0:25";
-static HOSTNAME: &str = "mx1.domain.tld"; //mx1.domain.tld Will read this from config
-static MAX_BAD_ATTEMPTS: u8 = 3;
+mod email;
+use email::Email;
+
+mod error;
+use error::{Error, Result};
 
 mod global;
+use global::{HOSTNAME, MAX_BAD_ATTEMPTS, BIND_ADDRESS};
 
-#[derive(Debug)]
-enum Error{
-    IO(std::io::Error),
-    UTF8(std::string::FromUtf8Error),
-    SystemTime(std::time::SystemTimeError),
-}
+mod command;
+use command::Command;
 
-#[derive(Debug)]
-enum SmtpCommand{
-    Ehlo,
-    Helo,
-    AuthLogin,
-    AuthPlain,
-    MailFrom,
-    RcptTo,
-    Data,
-    Quit,
-    CommandUnrecognised,
-}
-
-impl SmtpCommand{
-    fn lookup(string: &str) -> Self {
-        let mut text = string.to_owned();
-        text.make_ascii_uppercase();
-        if text.starts_with("EHLO") { return Self::Ehlo }
-        if text.starts_with("HELO") {  return Self::Helo }
-        if text.starts_with("AUTH LOGIN") {  return Self::AuthLogin }
-        if text.starts_with("AUTH PLAIN") {  return Self::AuthPlain }
-        if text.starts_with("MAIL FROM:") {  return Self::MailFrom }
-        if text.starts_with("RCPT TO:") {  return Self::RcptTo }
-        if text.starts_with("DATA") {  return Self::Data }
-        if text.starts_with("QUIT") {  return Self::Quit }
-        Self::CommandUnrecognised
-    }
-}
-
+/// Program Entry Point, calls the TCP listener `listen`
+/// 
 fn main() {
-
     listen().unwrap();
 }
 
-
+/// Listens for TCP connections then starts a thread to deal with them `smtp_main`
+/// 
 fn listen() -> Result<()>{
-
     println!("Starting SMTP Server...");
     let listener = TcpListener::bind(BIND_ADDRESS).map_err(Error::IO)?;
-   // listener.set_nonblocking(true).expect("Cannot set non-blocking"); Dont need this?
     println!("Listening on {}", listener.local_addr().map_err(Error::IO)?);
-
-
     for stream in listener.incoming() {
         match stream {
             Ok(s) => {
                 std::thread::spawn(|| -> Result<()> {
-                    println!("Recieved connection from: {}", &s.peer_addr().map_err(Error::IO)?);
+                    println!("Received connection from: {}", &s.peer_addr().map_err(Error::IO)?);
                     smtp_main(s)?;
                     Ok(())
                 });
@@ -91,11 +58,10 @@ fn listen() -> Result<()>{
     Ok(())
 }
 /// This function reads a TCP stream until a CLRF `[13, 10]` is sent then collects into a [Vec]
-fn read<T>(stream: T) -> Result<Vec<u8>> where T: std::io::Read {
-    
+/// 
+fn read<T>(stream: T) -> Result<Vec<u8>> where T: std::io::Read {  
     let mut reader = BufReader::new(stream);
     let mut data: Vec<u8> = vec![];
-
     loop{
         let buffer = reader.fill_buf();      
         match buffer {
@@ -111,38 +77,33 @@ fn read<T>(stream: T) -> Result<Vec<u8>> where T: std::io::Read {
             _ => {}
         }      
     }
-    //println!("Data from client: {:?}", data);
     println!("{}", String::from_utf8_lossy(&data));
     Ok(data)
 }
-
+/// Wrapper around writing to TCP stream, handles the no whitespace requirement of the HELO response
+/// 
 fn write(mut stream: &TcpStream, status: StatusCodes, msg: String) -> Result<()> {
-
-    let res = format!("{}{}", String::from(status), msg);
+    let mut res = String::new();
+    if msg.contains("-Hello"){
+        res = format!("{}{}", String::from(status), msg);
+    }else{
+        res = format!("{} {}", String::from(status), msg);
+    }
     stream.write(res.as_bytes()).map_err(Error::IO)?;
-
     Ok(())
 }
-
-// File name is time in seconds from EPOCH
-fn save_email(data: Vec<u8>) -> Result<()>{
-    let time = std::time::SystemTime::now();
-    let filename = format!("{:?}.eml", time.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(Error::SystemTime)?);
-    let mut file = std::fs::File::create(filename).map_err(Error::IO)?;
-    file.write(&data).map_err(Error::IO)?;
-    Ok(())
-}  
-
+/// Once a TCP session is established this is the main loop for handling the transaction
+/// 
 fn smtp_main(stream: TcpStream) -> Result<()>{
 
-    let mut domain = String::new();
     let mut sender = String::new();
     let mut recipient = String::new();
     let mut bad_attempts = 0;
     let mut authenticated = false;
 
+    let mut email = Email::new();
 
-    let welcome = format!(" {} SMTP MAIL Service Ready [{}]\r\n", HOSTNAME, global::public_ip().lock().unwrap());
+    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", HOSTNAME, global::public_ip().lock().unwrap());
     // Inital connection
     write(&stream, StatusCodes::ServiceReady, welcome.into())?;
         
@@ -150,60 +111,58 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
         let res_raw = read(&stream)?;
         let res = String::from_utf8(res_raw).map_err(Error::UTF8)?;
 
-        let cmd = SmtpCommand::lookup(res.as_ref());  
+        let cmd = Command::lookup(res.as_ref());  
         match cmd {
-            SmtpCommand::Ehlo => {
-                let tmp = res.splitn(2, "ehlo").last().unwrap_or("");
-                domain = tmp.replace(&[' ', '\r','\n'][..], "");
-                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", domain).into())?;
+            Command::Ehlo => {
+                email.set_domain(res);
+                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", email.domain()))?;
             }
-            SmtpCommand::Helo => {
-                let tmp = res.splitn(2, "helo").last().unwrap_or("");
-                domain = tmp.replace(&[' ', '\r','\n'][..], "");
-                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", domain).into())?;
+            Command::Helo => {
+                email.set_domain(res);
+                write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", email.domain()))?;
             }
-            SmtpCommand::AuthPlain => {
+            Command::AuthPlain => {
                 write(&stream, StatusCodes::AuthenticationSuceeded, "\r\n".into())?;
                 authenticated = true;
             }
-            SmtpCommand::AuthLogin => {
-                write(&stream, StatusCodes::ServerChallenge, " VXNlcm5hbWU6\r\n".into())?;
+            Command::AuthLogin => {
+                write(&stream, StatusCodes::ServerChallenge, "VXNlcm5hbWU6\r\n".into())?;
                 let user = read(&stream);
-                write(&stream, StatusCodes::ServerChallenge, " UGFzc3dvcmQ6\r\n".into())?;
+                write(&stream, StatusCodes::ServerChallenge, "UGFzc3dvcmQ6\r\n".into())?;
                 let pass = read(&stream);
-                write(&stream, StatusCodes::AuthenticationSuceeded, " 2.7.0 Authentication successful\r\n".into())?;
+                write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
                 authenticated = true;
 
             }
-            SmtpCommand::MailFrom => {
+            Command::MailFrom => {
                 write(&stream, StatusCodes::Ok, "\r\n".into())?;
                 let tmp = res.splitn(2, "mail from:").last().unwrap_or("");
                 sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
-            SmtpCommand::RcptTo => {
-                write(&stream, StatusCodes::Ok, " Ok\r\n".into())?;
+            Command::RcptTo => {
+                write(&stream, StatusCodes::Ok, "Ok\r\n".into())?;
                 let tmp = res.splitn(2, "rcpt to:").last().unwrap_or("");
                 recipient = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
-            SmtpCommand::Data => {
-                if sender == "" || domain == "" || recipient == "" {
-                    write(&stream, StatusCodes::BadCommandSequence, " EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
+            Command::Data => {
+                if sender == "" || email.domain() == "" || recipient == "" {
+                    write(&stream, StatusCodes::BadCommandSequence, "EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
                     continue;
                 }
-                write(&stream, StatusCodes::StartingMailInput, " Ok\r\n".into())?;
+                write(&stream, StatusCodes::StartingMailInput, "Ok\r\n".into())?;
                 let mut data: Vec<u8> = Vec::new();
                 loop {
                     let mut tmp = read(&stream)?;
                     data.append(&mut tmp);
-                    // Checks for CLRF.CLRF
+                    // Checks for `CLRF.CLRF`
                     if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { break }
                 }
-                save_email(data)?;
-                println!("Sender: {}, Domain: {}, Recipient: {}", sender, domain, recipient);
-                write(&stream, StatusCodes::Ok, " Recieved Data\r\n".into())?;
+                email.save_email(data)?;
+                println!("Sender: {}, Domain: {}, Recipient: {}", sender, email.domain(), recipient);
+                write(&stream, StatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
-            SmtpCommand::Quit => {
-                write(&stream, StatusCodes::ServiceClosed, " Goodbye\r\n".into())?;
+            Command::Quit => {
+                write(&stream, StatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
                 break;
             }
             _ => { 
@@ -220,6 +179,3 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
     }  
     Ok(())
 }
-
-#[cfg(test)]
-mod test;
