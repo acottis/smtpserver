@@ -18,7 +18,6 @@ impl Email{
     pub fn new() -> Self{
         Default::default()
     }
-
     /// Setter for `self.domain`
     /// 
     pub fn set_domain(&mut self, res: String){
@@ -29,6 +28,28 @@ impl Email{
     /// 
     pub fn domain(&self) -> String{
         self.domain.clone()
+    }
+    /// Setter for `self.sender`
+    /// 
+    pub fn set_sender(&mut self, res: String){
+        let tmp = res.splitn(2, "mail from:").last().unwrap_or("");
+        self.sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
+    }
+    /// Getter for `self.sender`
+    /// 
+    pub fn sender(&self) -> String{
+        self.sender.clone()
+    }
+    /// Setter for `self.recipient`
+    /// 
+    pub fn set_recipient(&mut self, res: String){
+        let tmp = res.splitn(2, "ehlo").last().unwrap_or("");
+        self.recipient = tmp.replace(&[' ', '\r','\n'][..], "");
+    }
+    /// Getter for `self.recipient`
+    /// 
+    pub fn recipient(&self) -> String{
+        self.recipient.clone()
     }
     /// Insert receieved header into email after recieving it
     /// 

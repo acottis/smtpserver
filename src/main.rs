@@ -96,19 +96,20 @@ fn write(mut stream: &TcpStream, status: StatusCodes, msg: String) -> Result<()>
 /// 
 fn smtp_main(stream: TcpStream) -> Result<()>{
 
-    let mut sender = String::new();
-    let mut recipient = String::new();
     let mut bad_attempts = 0;
-    let mut authenticated = false;
+    let mut _authenticated = false;
 
+    // Struct to handle the data associated with the email
     let mut email = Email::new();
 
+    // Inital connection Response
     let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", HOSTNAME, global::public_ip().lock().unwrap());
-    // Inital connection
     write(&stream, StatusCodes::ServiceReady, welcome.into())?;
         
     loop{
+        // Raw bytes from stream
         let res_raw = read(&stream)?;
+        // String representation of bytes
         let res = String::from_utf8(res_raw).map_err(Error::UTF8)?;
 
         let cmd = Command::lookup(res.as_ref());  
@@ -121,31 +122,30 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 email.set_domain(res);
                 write(&stream, StatusCodes::Ok, format!("-Hello {}\r\n250 AUTH LOGIN PLAIN\r\n", email.domain()))?;
             }
+            // Currently no authentication checking TODO
             Command::AuthPlain => {
-                write(&stream, StatusCodes::AuthenticationSuceeded, "\r\n".into())?;
-                authenticated = true;
+                write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
+                _authenticated = true;
             }
+            // Currently no authentication checking TODO
             Command::AuthLogin => {
                 write(&stream, StatusCodes::ServerChallenge, "VXNlcm5hbWU6\r\n".into())?;
-                let user = read(&stream);
+                let _user = read(&stream);
                 write(&stream, StatusCodes::ServerChallenge, "UGFzc3dvcmQ6\r\n".into())?;
-                let pass = read(&stream);
+                let _pass = read(&stream);
                 write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
-                authenticated = true;
-
+                _authenticated = true;
             }
             Command::MailFrom => {
+                email.set_sender(res);
                 write(&stream, StatusCodes::Ok, "\r\n".into())?;
-                let tmp = res.splitn(2, "mail from:").last().unwrap_or("");
-                sender = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             Command::RcptTo => {
+                email.set_recipient(res);
                 write(&stream, StatusCodes::Ok, "Ok\r\n".into())?;
-                let tmp = res.splitn(2, "rcpt to:").last().unwrap_or("");
-                recipient = tmp.replace(&[' ', '\r','\n','<','>'][..], "");
             }
             Command::Data => {
-                if sender == "" || email.domain() == "" || recipient == "" {
+                if email.sender() == "" || email.domain() == "" || email.recipient() == "" {
                     write(&stream, StatusCodes::BadCommandSequence, "EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
                     continue;
                 }
@@ -158,7 +158,7 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                     if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { break }
                 }
                 email.save_email(data)?;
-                println!("Sender: {}, Domain: {}, Recipient: {}", sender, email.domain(), recipient);
+                println!("Sender: {}, Domain: {}, Recipient: {}", email.sender(), email.domain(), email.recipient());
                 write(&stream, StatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             Command::Quit => {
