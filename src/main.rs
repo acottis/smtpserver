@@ -26,7 +26,7 @@ mod error;
 use error::{Error, Result};
 
 mod global;
-use global::{HOSTNAME, MAX_BAD_ATTEMPTS, BIND_ADDRESS};
+use global::{MAX_BAD_ATTEMPTS};
 
 mod command;
 use command::Command;
@@ -41,7 +41,8 @@ fn main() {
 /// 
 fn listen() -> Result<()>{
     println!("Starting SMTP Server...");
-    let listener = TcpListener::bind(BIND_ADDRESS).map_err(Error::IO)?;
+    let bind_addr = global::bind_addr().lock().unwrap().to_string();
+    let listener = TcpListener::bind(bind_addr).map_err(Error::IO)?;
     println!("Listening on {}", listener.local_addr().map_err(Error::IO)?);
     for stream in listener.incoming() {
         match stream {
@@ -101,11 +102,12 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
 
     // Struct to handle the data associated with the email
     let mut email = Email::new();
+    email.set_sender_ip(stream.peer_addr().unwrap().ip().to_string());
 
     // Inital connection Response
-    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", HOSTNAME, global::public_ip().lock().unwrap());
+    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", global::hostname().lock().unwrap(), global::public_ip().lock().unwrap());
     write(&stream, StatusCodes::ServiceReady, welcome.into())?;
-        
+       
     loop{
         // Raw bytes from stream
         let res_raw = read(&stream)?;
@@ -146,19 +148,23 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             }
             Command::Data => {
                 if email.sender() == "" || email.domain() == "" || email.recipient() == "" {
-                    write(&stream, StatusCodes::BadCommandSequence, "EHLO/HELO, MAIL FROM: and RCPT: are required before DATA\r\n".into())?;
+                    write(&stream, StatusCodes::BadCommandSequence, format!("EHLO/HELO, MAIL FROM: and RCPT: are required before DATA, Attempts Remaining: {}\r\n", MAX_BAD_ATTEMPTS - bad_attempts))?;
+                    bad_attempts += 1;
                     continue;
                 }
                 write(&stream, StatusCodes::StartingMailInput, "Ok\r\n".into())?;
                 let mut data: Vec<u8> = Vec::new();
+                // Loops until `CLRF.CLRF`
                 loop {
                     let mut tmp = read(&stream)?;
                     data.append(&mut tmp);
                     // Checks for `CLRF.CLRF`
-                    if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { break }
+                    if &data[&data.len()-5..] == &[13, 10, 46, 13, 10] { 
+                        data.truncate(data.len()-5); // Removes the `CLRF.CLRF`
+                        break; 
+                    }
                 }
                 email.save_email(data)?;
-                println!("Sender: {}, Domain: {}, Recipient: {}", email.sender(), email.domain(), email.recipient());
                 write(&stream, StatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             Command::Quit => {
@@ -169,11 +175,12 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 bad_attempts += 1;
                 println!("{:?} found", cmd);
                 write(&stream, StatusCodes::CommandUnrecognised, format!("Command Unrecognised, Attempts Remaining: {}\r\n", (MAX_BAD_ATTEMPTS - bad_attempts)))?;
-                if bad_attempts > 3 { 
-                    let _ = &stream.shutdown(std::net::Shutdown::Both);
-                    break;
-                }
             }
+        }
+        // Kill session if being spammed by bad commands
+        if bad_attempts > 3 { 
+            let _ = &stream.shutdown(std::net::Shutdown::Both);
+            break;
         }
         //std::thread::sleep(std::time::Duration::from_secs(1));
     }  

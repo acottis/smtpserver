@@ -12,7 +12,7 @@ fn recv_email_local(){
         ("127.0.0.1").into(), //host 
         ("25").into(), //port
         ("sender@example.com").into(), //sender
-        ("recipient@example2.com").into(), //recipient
+        ("test@example2.com").into(), //recipient
         ("example.com").into() //domain
     );
     smtp_client_builder
@@ -25,8 +25,6 @@ fn recv_email_local(){
 
 #[test]
 fn test_email_struct(){
-
     let email = Email::new();
     println!("{:?}", email)
-
 }

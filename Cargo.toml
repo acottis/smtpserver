@@ -9,6 +9,5 @@ edition = "2021"
 smtpclient =  {path = "../smtpclient" }
 regex = "1"
 chrono = "0.4.19"
-
-[dev-dependencies]
 aml = { git = "https://github.com/acottis/aml" }
+

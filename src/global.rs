@@ -4,14 +4,12 @@ use std::sync::{Mutex, Once};
 use std::io::prelude::{Write, Read};
 
 pub static BIND_ADDRESS: &str = "0.0.0.0:25";
-pub static HOSTNAME: &str = "mx1.domain.tld"; //mx1.domain.tld Will read this from config
 pub static MAX_BAD_ATTEMPTS: u8 = 3;
 
 pub fn public_ip() -> &'static Mutex<String> {
     // Create an uninitialized static
     static mut PUBLIC_IP: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
     static ONCE: Once = Once::new();
-
     unsafe {
         ONCE.call_once(|| {
             // Make it
@@ -19,10 +17,43 @@ pub fn public_ip() -> &'static Mutex<String> {
             // Store it to the static var, i.e. initialize it
             PUBLIC_IP.write(public_ip);
         });
-
         // Now we give out a shared reference to the data, which is safe to use
         // concurrently.
         PUBLIC_IP.assume_init_ref()
+    }
+}
+pub fn hostname() -> &'static Mutex<String> {
+    // Create an uninitialized static
+    static mut HOSTNAME: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
+    static ONCE: Once = Once::new();
+    unsafe {
+        ONCE.call_once(|| {
+            // Make it
+            let config = aml::load("config.aml".into());
+            let hostname = Mutex::new(config.get("hostname").unwrap().to_owned());
+            // Store it to the static var, i.e. initialize it
+            HOSTNAME.write(hostname);
+        });
+        // Now we give out a shared reference to the data, which is safe to use
+        // concurrently.
+        HOSTNAME.assume_init_ref()
+    }
+}
+pub fn bind_addr() -> &'static Mutex<String> {
+    // Create an uninitialized static
+    static mut BIND_ADDRESS: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
+    static ONCE: Once = Once::new();
+    unsafe {
+        ONCE.call_once(|| {
+            // Make it
+            let config = aml::load("config.aml".into());
+            let bind_address = Mutex::new(config.get("bind_addr").unwrap().to_owned());
+            // Store it to the static var, i.e. initialize it
+            BIND_ADDRESS.write(bind_address);
+        });
+        // Now we give out a shared reference to the data, which is safe to use
+        // concurrently.
+        BIND_ADDRESS.assume_init_ref()
     }
 }
 
