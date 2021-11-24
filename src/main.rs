@@ -98,7 +98,6 @@ fn write(mut stream: &TcpStream, status: StatusCodes, msg: String) -> Result<()>
 fn smtp_main(stream: TcpStream) -> Result<()>{
 
     let mut bad_attempts = 0;
-    let mut _authenticated = false;
 
     // Struct to handle the data associated with the email
     let mut email = Email::new();
@@ -126,8 +125,10 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             }
             // Currently no authentication checking TODO
             Command::AuthPlain => {
-                write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
-                _authenticated = true;
+                match email.auth_plain(res){
+                    Ok(_) => write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?,
+                    Err(e) => write(&stream, StatusCodes::AuthenticationFailed, format!("{:?}\r\n", e))?,
+                }
             }
             // Currently no authentication checking TODO
             Command::AuthLogin => {
@@ -136,7 +137,6 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 write(&stream, StatusCodes::ServerChallenge, "UGFzc3dvcmQ6\r\n".into())?;
                 let _pass = read(&stream);
                 write(&stream, StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
-                _authenticated = true;
             }
             Command::MailFrom => {
                 email.set_sender(res);
@@ -166,6 +166,8 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 }
                 email.save_email(data)?;
                 write(&stream, StatusCodes::Ok, "Recieved Data\r\n".into())?;
+                // SENDS THE ACTUAL EMAIL
+                email.send().unwrap();
             }
             Command::Quit => {
                 write(&stream, StatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
