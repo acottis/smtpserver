@@ -133,7 +133,7 @@ impl Email{
         let copy = std::fs::copy(&email, &destination);
         match copy {
             Ok(_) => { 
-                std::fs::remove_file(&self.filename).map_err(|e| Error::FileDelete((e, format!("Filename: {}", &self.filename))))?;
+                std::fs::remove_file(&email).map_err(|e| Error::FileDelete((e, format!("Filename: {}", &email))))?;
                 return Ok(())
             },
             Err(e) => return Err(Error::FileCopy((e, format!("From: {}, To: {}", &email, &destination))))
