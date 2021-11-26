@@ -41,6 +41,11 @@ fn main() {
 /// 
 fn listen() -> Result<()>{
     println!("Starting SMTP Server...");
+    let mail_root = global::mail_root().lock().expect("No mail route set in config");
+    println!("Mail root is at: {}", mail_root);
+    // Drop value as this function never ends
+    drop(mail_root);
+
     let bind_addr = global::bind_addr().lock().unwrap().to_string();
     let listener = TcpListener::bind(bind_addr).map_err(Error::IO)?;
     println!("Listening on {}", listener.local_addr().map_err(Error::IO)?);
@@ -78,7 +83,7 @@ fn read<T>(stream: T) -> Result<Vec<u8>> where T: std::io::Read {
             _ => {}
         }      
     }
-    println!("{}", String::from_utf8_lossy(&data));
+    print!("C: {}", String::from_utf8_lossy(&data));
     Ok(data)
 }
 /// Wrapper around writing to TCP stream, handles the no whitespace requirement of the HELO response
@@ -90,6 +95,7 @@ fn write(mut stream: &TcpStream, status: StatusCodes, msg: String) -> Result<()>
     }else{
         res = format!("{} {}", String::from(status), msg);
     }
+    print!("S: {}", res);
     stream.write(res.as_bytes()).map_err(Error::IO)?;
     Ok(())
 }
@@ -102,7 +108,6 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
     // Struct to handle the data associated with the email
     let mut email = Email::new();
     email.set_sender_ip(stream.peer_addr().unwrap().ip().to_string());
-
     // Inital connection Response
     let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", global::hostname().lock().unwrap(), global::public_ip().lock().unwrap());
     write(&stream, StatusCodes::ServiceReady, welcome.into())?;
@@ -140,14 +145,14 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             }
             Command::MailFrom => {
                 email.set_sender(res);
-                write(&stream, StatusCodes::Ok, "\r\n".into())?;
+                write(&stream, StatusCodes::Ok, "Ok\r\n".into())?;
             }
             Command::RcptTo => {
                 email.set_recipient(res);
                 write(&stream, StatusCodes::Ok, "Ok\r\n".into())?;
             }
             Command::Data => {
-                if email.sender() == "" || email.domain() == "" || email.recipient() == "" {
+                if email.sender() == "" || email.domain() == "" || email.recipient() == "" { // || !email.authenticated() {
                     write(&stream, StatusCodes::BadCommandSequence, format!("EHLO/HELO, MAIL FROM: and RCPT: are required before DATA, Attempts Remaining: {}\r\n", MAX_BAD_ATTEMPTS - bad_attempts))?;
                     bad_attempts += 1;
                     continue;
@@ -163,11 +168,9 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                         data.truncate(data.len()-5); // Removes the `CLRF.CLRF`
                         break; 
                     }
-                }
-                email.save_email(data)?;
+                }     
+                email.save_email(data).unwrap();
                 write(&stream, StatusCodes::Ok, "Recieved Data\r\n".into())?;
-                // SENDS THE ACTUAL EMAIL
-                email.send().unwrap();
             }
             Command::Quit => {
                 write(&stream, StatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
@@ -184,7 +187,16 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             let _ = &stream.shutdown(std::net::Shutdown::Both);
             break;
         }
-        //std::thread::sleep(std::time::Duration::from_secs(1));
-    }  
+    }
+    // Sends the email if its for an external addresss
+    if email.domain() != global::hosted_email_domain().lock().unwrap().to_owned(){
+        email.send()?;  
+    } else{
+        // Stores the email to user mailbox
+        match email.store() {
+            Ok(_) => println!("Email moved sucessfully"),
+            Err(e) => println!("Email could not be moved to folder: {:?}", e),
+        }
+    }
     Ok(())
 }

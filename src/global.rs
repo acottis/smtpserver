@@ -30,7 +30,7 @@ pub fn hostname() -> &'static Mutex<String> {
     unsafe {
         ONCE.call_once(|| {
             // Make it
-            let config = aml::load("config.aml".into());
+            let config = aml::load("config.aml");
             let hostname = Mutex::new(config.get("hostname").unwrap().to_owned());
             // Store it to the static var, i.e. initialize it
             HOSTNAME.write(hostname);
@@ -47,7 +47,7 @@ pub fn bind_addr() -> &'static Mutex<String> {
     unsafe {
         ONCE.call_once(|| {
             // Make it
-            let config = aml::load("config.aml".into());
+            let config = aml::load("config.aml");
             let bind_address = Mutex::new(config.get("bind_addr").unwrap().to_owned());
             // Store it to the static var, i.e. initialize it
             BIND_ADDRESS.write(bind_address);
@@ -55,6 +55,40 @@ pub fn bind_addr() -> &'static Mutex<String> {
         // Now we give out a shared reference to the data, which is safe to use
         // concurrently.
         BIND_ADDRESS.assume_init_ref()
+    }
+}
+pub fn hosted_email_domain() -> &'static Mutex<String> {
+    // Create an uninitialized static
+    static mut DOMAIN: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
+    static ONCE: Once = Once::new();
+    unsafe {
+        ONCE.call_once(|| {
+            // Make it
+            let config = aml::load("config.aml");
+            let domain = Mutex::new(config.get("domain").unwrap().to_owned());
+            // Store it to the static var, i.e. initialize it
+            DOMAIN.write(domain);
+        });
+        // Now we give out a shared reference to the data, which is safe to use
+        // concurrently.
+        DOMAIN.assume_init_ref()
+    }
+}
+pub fn mail_root() -> &'static Mutex<String> {
+    // Create an uninitialized static
+    static mut MAIL_ROOT: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
+    static ONCE: Once = Once::new();
+    unsafe {
+        ONCE.call_once(|| {
+            // Make it
+            let config = aml::load("config.aml");
+            let mail_root = Mutex::new(config.get("mail_root").unwrap().to_owned());
+            // Store it to the static var, i.e. initialize it
+            MAIL_ROOT.write(mail_root);
+        });
+        // Now we give out a shared reference to the data, which is safe to use
+        // concurrently.
+        MAIL_ROOT.assume_init_ref()
     }
 }
 

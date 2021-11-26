@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use std::io::{Write, Read};
+use std::fs::{File, OpenOptions};
 use crate::error::{Result, Error};
 use crate::global;
 
@@ -13,13 +14,17 @@ pub struct Email{
     sender_ip: String,
     authenticated: bool,
     filename: String,
+    mail_root: String,
 }
 
 impl Email{
     /// Creates new [Email] with defaults 
     /// 
-    pub fn new() -> Self{
-        Default::default()
+    pub fn new() -> Self{   
+        Self {
+            mail_root: global::mail_root().lock().unwrap().to_owned(),
+            ..Default::default()
+        }
     }
     /// Setter for `self.sender_ip`
     /// 
@@ -66,7 +71,7 @@ impl Email{
     }
     /// Generate receieved header into email after recieving it
     /// 
-    fn gen_recv_header(&self) -> Vec<u8> {
+    fn generate_recveived_header(&self, file: &mut File) -> Result<()> {
         let now: DateTime<Utc> = Utc::now();
         let header = format!(
             "Received: from {from_mx} ({from_mx_ip}) by {my_mx} (AdaMPT) with {encryption} id {id}; {date_received}\r\n",
@@ -77,30 +82,61 @@ impl Email{
             date_received = now.to_rfc2822(),
             id = now.timestamp(),
         );
-        // println!("{}", header);
-        header.as_bytes().to_vec()
+        //println!("{}", header);
+        file.write(header.as_bytes()).map_err(|e| Error::AddingReceivedHeader(e))?;
+        Ok(())
     }
     /// File name is time in seconds from EPOCH, saves file to mailbox
     /// 
     pub fn save_email(&mut self, data: Vec<u8>) -> Result<()>{
         let time = std::time::SystemTime::now();
-        self.filename = format!("{:?}.eml", time.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(Error::SystemTime)?);
-        let mut file = std::fs::File::create(self.filename.clone()).map_err(Error::IO)?;
-        let recv_header = self.gen_recv_header();
-        file.write(&recv_header).map_err(Error::IO)?;
-        file.write(&data).map_err(Error::IO)?;
+        self.filename = format!("{:?}.eml", time.duration_since(std::time::SystemTime::UNIX_EPOCH).map_err(Error::SystemTime)?); 
+        let path = format!("{}/{}", self.mail_root, self.filename);
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(path)
+            .map_err(|e|Error::ProcessingEmailData(e))?;
+
+        // Insert Recieved Header
+        self.generate_recveived_header(&mut file)?;
+
+        // Write email to file
+        file.write(&data).map_err(|e|Error::ProcessingEmailData(e))?;
         Ok(())
     }
     /// Controls authentication for auth plain
     /// 
     pub fn auth_plain(&mut self, res: String) -> Result<()>{
         let creds = res.split(" ").last().unwrap().replace(&['\r','\n'][..], "").to_string();
-        let secrets = aml::load("config.aml".into());
+        let secrets = aml::load("config.aml");
         if &creds == secrets.get("password").unwrap(){
             self.authenticated = true;
             Ok(())
         }else{
             Err(Error::BadAuth)
+        }
+    }
+    /// Moves an email to a user mailbox
+    pub fn store(&self) -> Result<()>{
+        let user = &self.recipient.split("@").next().unwrap();
+        let email = format!("{}/{}", self.mail_root, self.filename);
+        let user_folder = format!("{}/mail/{}/Inbox/", &self.mail_root, user);
+        
+        let destination = match std::path::Path::new(&user_folder).exists() {
+            true => format!("{}/{}", user_folder, &self.filename),
+            false => format!("{}/mail/{}/{}", &self.mail_root, "catch-all", &self.filename),
+        };
+        
+        println!("Attempting to move Email: {}, to Folder: {} ...", &email, user_folder);
+        let copy = std::fs::copy(&email, &destination);
+        match copy {
+            Ok(_) => { 
+                std::fs::remove_file(&self.filename).map_err(|e| Error::FileDelete((e, format!("Filename: {}", &self.filename))))?;
+                return Ok(())
+            },
+            Err(e) => return Err(Error::FileCopy((e, format!("From: {}, To: {}", &email, &destination))))
         }
     }
     /// Sends the email on if required, IP locked for now
@@ -114,12 +150,14 @@ impl Email{
         } 
         println!("-------------------------------------------");
         println!("-------------SENDING EMAIL NOW-------------");
+        println!("----Filename: {}-------------", &self.filename);
+        println!("----------Insert webhook here TODO---------");
         println!("-------------------------------------------");
         let mut buf = vec![];
         let mut f = std::fs::File::open(&self.filename).unwrap();
         f.read_to_end(&mut buf).map_err(Error::IO)?;
         buf.extend_from_slice(&[b'\r',b'\n',b'.',b'\r',b'\n']);
-        let secrets = aml::load("secret.aml".into());
+        let secrets = aml::load("secret.aml");
         let smtp_client_builder = smtpclient::SmtpBuilder::new(
             secrets.get("host").unwrap().into(), //host 
             secrets.get("port").unwrap().into(), //port
@@ -127,6 +165,7 @@ impl Email{
             self.recipient.to_owned(), //recipient
             self.domain.to_owned() //domain
         );
+        //println!("{}", String::from_utf8(buf.clone()).unwrap());
         smtp_client_builder
             .raw_bytes(buf)
             .starttls()

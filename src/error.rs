@@ -9,4 +9,8 @@ pub enum Error{
     SendSecurityPolicy(String),
     Regex(regex::Error),
     GetPublicIP,
+    AddingReceivedHeader(std::io::Error),
+    ProcessingEmailData(std::io::Error),
+    FileCopy((std::io::Error, String)),
+    FileDelete((std::io::Error, String))
 }
