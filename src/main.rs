@@ -152,11 +152,16 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                     }
                 }     
                 email.save_email(data).unwrap();
-                stream.write(StatusCodes::Ok, "Recieved Data\r\n".into())?;
-
                 // Sends the email if its for an external addresss
                 if email.recipient_domain() != global::lookup("my_domain") {
-                    email.send().unwrap();
+                    match email.send() {
+                        Ok(_) => println!("Email sent sucessfully"),
+                        Err(e) => {
+                            println!("Error: {:?}", e);
+                            stream.write(StatusCodes::AuthenticationRequired, format!("Goodbye\r\n"))?;
+                            break;
+                        }
+                    }
                 } else{
                     // Stores the email to user mailbox
                     match email.store() {
@@ -164,6 +169,7 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                         Err(e) => println!("Email could not be moved to folder: {:?}", e),
                     }
                 }
+                stream.write(StatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             Command::Quit => {
                 stream.write(StatusCodes::ServiceClosed, "Goodbye\r\n".into())?;
@@ -183,5 +189,6 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             stream.shutdown().expect("Stream could not shutdown")
         }
     }
+    stream.shutdown().expect("Stream could not shutdown");
     Ok(())
 }
