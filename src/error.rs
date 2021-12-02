@@ -12,5 +12,7 @@ pub enum Error{
     AddingReceivedHeader(std::io::Error),
     ProcessingEmailData(std::io::Error),
     FileCopy((std::io::Error, String)),
-    FileDelete((std::io::Error, String))
+    FileDelete((std::io::Error, String)),
+    TCPReadTimeout,
+    CouldNotSend(String),
 }

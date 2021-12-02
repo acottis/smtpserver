@@ -3,6 +3,7 @@
 pub enum Command{
     Ehlo,
     Helo,
+    Starttls,
     AuthLogin,
     AuthPlain,
     MailFrom,
@@ -18,6 +19,7 @@ impl Command{
         text.make_ascii_uppercase();
         if text.starts_with("EHLO") { return Self::Ehlo }
         if text.starts_with("HELO") {  return Self::Helo }
+        if text.starts_with("STARTTLS") {  return Self::Starttls }
         if text.starts_with("AUTH LOGIN") {  return Self::AuthLogin }
         if text.starts_with("AUTH PLAIN") {  return Self::AuthPlain }
         if text.starts_with("MAIL FROM:") {  return Self::MailFrom }

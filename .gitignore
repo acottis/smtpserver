@@ -3,3 +3,5 @@
 *.msg
 *.eml
 *.aml
+*.pfx
+*.ps1

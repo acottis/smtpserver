@@ -11,6 +11,7 @@ pub struct Email{
     domain: String,
     sender: String,
     recipient: String,
+    recipient_domain: String,
     sender_ip: String,
     authenticated: bool,
     filename: String,
@@ -58,11 +59,17 @@ impl Email{
     pub fn set_recipient(&mut self, res: String){
         let tmp = res.splitn(2, ":").last().unwrap_or("");
         self.recipient = tmp.replace(&[' ','\r','\n','<','>'][..], "");
+        self.recipient_domain = self.recipient.split("@").last().unwrap().to_string();
     }
     /// Getter for `self.recipient`
     /// 
     pub fn recipient(&self) -> String{
         self.recipient.clone()
+    }
+    /// Getter for `self.recipient_domain`
+    /// 
+    pub fn recipient_domain(&self) -> String{
+        self.recipient_domain.clone()
     }
     /// Getter for `self.authenticated`
     /// 
@@ -119,6 +126,7 @@ impl Email{
         }
     }
     /// Moves an email to a user mailbox
+    /// 
     pub fn store(&self) -> Result<()>{
         let user = &self.recipient.split("@").next().unwrap();
         let email = format!("{}/{}", self.mail_root, self.filename);
@@ -154,24 +162,28 @@ impl Email{
         println!("----------Insert webhook here TODO---------");
         println!("-------------------------------------------");
         let mut buf = vec![];
-        let mut f = std::fs::File::open(&self.filename).unwrap();
+        let email = format!("{}/{}", self.mail_root, self.filename);
+        let mut f = std::fs::File::open(email).unwrap();
         f.read_to_end(&mut buf).map_err(Error::IO)?;
         buf.extend_from_slice(&[b'\r',b'\n',b'.',b'\r',b'\n']);
-        let secrets = aml::load("secret.aml");
+        let config = aml::load("config.aml");
         let smtp_client_builder = smtpclient::SmtpBuilder::new(
-            secrets.get("host").unwrap().into(), //host 
-            secrets.get("port").unwrap().into(), //port
+            config.get("forwarder_hostname").unwrap().into(), //host 
+            config.get("forwarder_port").unwrap().into(), //port
             self.sender.to_owned(), //sender
             self.recipient.to_owned(), //recipient
             self.domain.to_owned() //domain
         );
         //println!("{}", String::from_utf8(buf.clone()).unwrap());
-        smtp_client_builder
+        let send = smtp_client_builder
             .raw_bytes(buf)
             .starttls()
-            .auth_login(secrets.get("username").unwrap().into(), secrets.get("password").unwrap().into())
-            .send().unwrap();
-        Ok(())
+            .auth_login(config.get("forwarder_username").unwrap().into(), config.get("forwarder_password").unwrap().into())
+            .send();
+        match send{
+            Ok(_) => Ok(()),
+            Err(e) => Err(Error::CouldNotSend(format!("{:?}", e))),
+        }
     }
 }
 

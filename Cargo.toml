@@ -10,4 +10,5 @@ smtpclient =  {path = "../smtpclient" }
 regex = "1"
 chrono = "0.4.19"
 aml = { git = "https://github.com/acottis/aml" }
+native-tls = "*"
 
