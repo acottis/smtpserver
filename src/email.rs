@@ -23,7 +23,7 @@ impl Email{
     /// 
     pub fn new() -> Self{   
         Self {
-            mail_root: global::mail_root().lock().unwrap().to_owned(),
+            mail_root: global::lookup("mail_root"),
             ..Default::default()
         }
     }
@@ -84,7 +84,7 @@ impl Email{
             "Received: from {from_mx} ({from_mx_ip}) by {my_mx} (AdaMPT) with {encryption} id {id}; {date_received}\r\n",
             from_mx = self.domain,
             from_mx_ip = self.sender_ip,
-            my_mx = global::hostname().lock().unwrap(),
+            my_mx = global::lookup("hostname"),
             encryption = "SMTP",
             date_received = now.to_rfc2822(),
             id = now.timestamp(),

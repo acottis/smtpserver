@@ -1,94 +1,40 @@
 
 use std::mem::MaybeUninit;
-use std::sync::{Mutex, Once};
+use std::sync::{Once};
 use std::io::prelude::{Write, Read};
+use std::collections::HashMap;
 use crate::error::{Error, Result};
 
 pub static MAX_BAD_ATTEMPTS: u8 = 3;
 
-pub fn public_ip() -> &'static Mutex<String> {
+/// Generic Global lookup for the config file
+/// 
+pub fn lookup(key: &str) -> String {
+    static mut CONFIG: MaybeUninit<HashMap<String,String>> = MaybeUninit::uninit();
+    static ONCE: Once = Once::new();
+    unsafe{
+        ONCE.call_once(|| {
+            let config = aml::load("config.aml");
+            CONFIG.write(config);
+        });      
+        match CONFIG.assume_init_ref().get(key){
+            Some(val) => val.to_owned(),
+            None => panic!("Config file issue, key: {}", key),
+        }
+    }
+}
+/// Runs a check to get a public IP and stores as static memory
+/// 
+pub fn public_ip() -> &'static String {
     // Create an uninitialized static
-    static mut PUBLIC_IP: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
+    static mut PUBLIC_IP: MaybeUninit<String> = MaybeUninit::uninit();
     static ONCE: Once = Once::new();
     unsafe {
         ONCE.call_once(|| {
-            // Make it
             let lookup = icanhazip().unwrap_or("".into());
-            let public_ip = Mutex::new(lookup);
-            // Store it to the static var, i.e. initialize it
-            PUBLIC_IP.write(public_ip);
+            PUBLIC_IP.write(lookup);
         });
-        // Now we give out a shared reference to the data, which is safe to use
-        // concurrently.
         PUBLIC_IP.assume_init_ref()
-    }
-}
-pub fn hostname() -> &'static Mutex<String> {
-    // Create an uninitialized static
-    static mut HOSTNAME: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
-    static ONCE: Once = Once::new();
-    unsafe {
-        ONCE.call_once(|| {
-            // Make it
-            let config = aml::load("config.aml");
-            let hostname = Mutex::new(config.get("hostname").unwrap().to_owned());
-            // Store it to the static var, i.e. initialize it
-            HOSTNAME.write(hostname);
-        });
-        // Now we give out a shared reference to the data, which is safe to use
-        // concurrently.
-        HOSTNAME.assume_init_ref()
-    }
-}
-pub fn bind_addr() -> &'static Mutex<String> {
-    // Create an uninitialized static
-    static mut BIND_ADDRESS: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
-    static ONCE: Once = Once::new();
-    unsafe {
-        ONCE.call_once(|| {
-            // Make it
-            let config = aml::load("config.aml");
-            let bind_address = Mutex::new(config.get("bind_addr").unwrap().to_owned());
-            // Store it to the static var, i.e. initialize it
-            BIND_ADDRESS.write(bind_address);
-        });
-        // Now we give out a shared reference to the data, which is safe to use
-        // concurrently.
-        BIND_ADDRESS.assume_init_ref()
-    }
-}
-pub fn hosted_email_domain() -> &'static Mutex<String> {
-    // Create an uninitialized static
-    static mut DOMAIN: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
-    static ONCE: Once = Once::new();
-    unsafe {
-        ONCE.call_once(|| {
-            // Make it
-            let config = aml::load("config.aml");
-            let domain = Mutex::new(config.get("domain").unwrap().to_owned());
-            // Store it to the static var, i.e. initialize it
-            DOMAIN.write(domain);
-        });
-        // Now we give out a shared reference to the data, which is safe to use
-        // concurrently.
-        DOMAIN.assume_init_ref()
-    }
-}
-pub fn mail_root() -> &'static Mutex<String> {
-    // Create an uninitialized static
-    static mut MAIL_ROOT: MaybeUninit<Mutex<String>> = MaybeUninit::uninit();
-    static ONCE: Once = Once::new();
-    unsafe {
-        ONCE.call_once(|| {
-            // Make it
-            let config = aml::load("config.aml");
-            let mail_root = Mutex::new(config.get("mail_root").unwrap().to_owned());
-            // Store it to the static var, i.e. initialize it
-            MAIL_ROOT.write(mail_root);
-        });
-        // Now we give out a shared reference to the data, which is safe to use
-        // concurrently.
-        MAIL_ROOT.assume_init_ref()
     }
 }
 

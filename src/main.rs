@@ -42,7 +42,8 @@ use stream::Stream;
 fn main() {
 
     println!("Starting SMTP Server...");
-    let mail_root = global::mail_root().lock().expect("No mail route set in config");
+    //let mail_root = global::mail_root().lock().expect("No mail route set in config");
+    let mail_root = global::lookup("mail_root");
     println!("Mail root is at: {}", mail_root);
     println!("-------------------------------------------");
     // Drop value as this function never ends
@@ -91,7 +92,7 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
     let mut email = Email::new();
     email.set_sender_ip(stream.tcp_stream.peer_addr().unwrap().ip().to_string());
     // Inital connection Response
-    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", global::hostname().lock().unwrap(), global::public_ip().lock().unwrap());
+    let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", global::lookup("hostname"), global::public_ip());
     stream.write(StatusCodes::ServiceReady, welcome.into())?;
        
     loop{
@@ -165,7 +166,7 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 stream.write(StatusCodes::Ok, "Recieved Data\r\n".into())?;
 
                 // Sends the email if its for an external addresss
-                if email.recipient_domain() != global::hosted_email_domain().lock().unwrap().to_owned(){
+                if email.recipient_domain() != global::lookup("my_domain") {
                     email.send().unwrap();
                 } else{
                     // Stores the email to user mailbox
