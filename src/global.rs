@@ -1,4 +1,3 @@
-
 use std::mem::MaybeUninit;
 use std::sync::{Once};
 use std::io::prelude::{Write, Read};
@@ -26,7 +25,6 @@ pub fn lookup(key: &str) -> String {
 /// Runs a check to get a public IP and stores as static memory
 /// 
 pub fn public_ip() -> &'static String {
-    // Create an uninitialized static
     static mut PUBLIC_IP: MaybeUninit<String> = MaybeUninit::uninit();
     static ONCE: Once = Once::new();
     unsafe {
@@ -37,8 +35,8 @@ pub fn public_ip() -> &'static String {
         PUBLIC_IP.assume_init_ref()
     }
 }
-
 /// Grabs public IP from icanhazip.com
+/// 
 fn icanhazip() -> Result<String> {
     let ip_addr_regex: regex::Regex =  regex::Regex::new(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}").map_err(Error::Regex)?;
     let buf = &mut [0u8;1000];

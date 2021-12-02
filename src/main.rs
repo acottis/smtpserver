@@ -13,11 +13,8 @@
 //! - Mail Size checking
 //! 
 use std::net::{TcpListener, TcpStream};
-use std::io::{BufReader, BufRead, Write, Read};
 use smtpclient::StatusCodes;
 use std::thread;
-use native_tls::{TlsAcceptor,TlsStream, Identity};
-use std::time::Duration;
 
 #[cfg(test)]
 mod test;
@@ -42,19 +39,14 @@ use stream::Stream;
 fn main() {
 
     println!("Starting SMTP Server...");
-    //let mail_root = global::mail_root().lock().expect("No mail route set in config");
     let mail_root = global::lookup("mail_root");
     println!("Mail root is at: {}", mail_root);
     println!("-------------------------------------------");
-    // Drop value as this function never ends
-    drop(mail_root);
 
     thread::spawn(|| {
         listen(TcpListener::bind("0.0.0.0:25").unwrap()).expect("Failed to Start Mail Server");
     });
     listen(TcpListener::bind("0.0.0.0:587").unwrap()).expect("Failed to Start Mail Server");
-
-    //loop { thread::sleep(Duration::from_secs(5))};
 }
 
 /// Listens for TCP connections then starts a thread to deal with them `smtp_main`
@@ -81,16 +73,13 @@ fn listen(listener: TcpListener) -> Result<()>{
 /// 
 fn smtp_main(stream: TcpStream) -> Result<()>{
 
-    let mut stream = Stream{
-        tcp_stream: stream,
-        tls_stream: None
-    };
+    let mut stream = Stream::new(stream);
 
     let mut bad_attempts = 0;
 
     // Struct to handle the data associated with the email
     let mut email = Email::new();
-    email.set_sender_ip(stream.tcp_stream.peer_addr().unwrap().ip().to_string());
+    email.set_sender_ip(stream.peer_addr().ip().to_string());
     // Inital connection Response
     let welcome = format!("{} SMTP MAIL Service Ready [{}]\r\n", global::lookup("hostname"), global::public_ip());
     stream.write(StatusCodes::ServiceReady, welcome.into())?;
@@ -191,7 +180,7 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
         // Kill session if being spammed by bad commands
         if bad_attempts >= 3 { 
             stream.write(StatusCodes::CommandUnrecognised, format!("Goodbye\r\n"))?;
-            return stream.tcp_stream.shutdown(std::net::Shutdown::Both).map_err(Error::IO)
+            stream.shutdown().expect("Stream could not shutdown")
         }
     }
     Ok(())
