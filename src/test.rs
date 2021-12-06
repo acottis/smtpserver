@@ -5,7 +5,7 @@ use smtpclient::SmtpBuilder;
 fn recv_email_local(){
 
     std::thread::spawn(||{
-        main(); 
+        main();
     });
 
     std::thread::sleep(std::time::Duration::from_secs(1));

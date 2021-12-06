@@ -5,12 +5,13 @@
 //! 
 //! # TODO
 //! - ~~Handle DATA msg with the . stop if it comes in mutiple parts~~
-//! - Implement port 587
-//! - Implement POP/IMAP
-//! - Send emails (Already have written just need logic to hook), Also need to impl AUTH for security, also bruteforce protection. Subnet allow list is probably best early protection
+//! - ~~Implement port 587~~
+//! - ~~Send emails (Already have written just need logic to hook), Also need to impl AUTH for security, also bruteforce protection. Subnet allow list is probably best early protection~~
 //! - Better threading (limit)
-//! - config file with hostname and port options
+//! - ~~config file with hostname and port options~~
 //! - Mail Size checking
+//! - Multiple To's
+//! - Ban IP's after multiple attempts
 //! 
 use std::net::{TcpListener, TcpStream};
 use smtpclient::StatusCodes;
@@ -114,10 +115,14 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
             // Currently no authentication checking TODO
             Command::AuthLogin => {
                 stream.write(StatusCodes::ServerChallenge, "VXNlcm5hbWU6\r\n".into())?;
-                let _user = stream.read();
+                let user = String::from_utf8(stream.read().unwrap()).unwrap();
                 stream.write(StatusCodes::ServerChallenge, "UGFzc3dvcmQ6\r\n".into())?;
-                let _pass = stream.read();
-                stream.write(StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?;
+                let pass = String::from_utf8(stream.read().unwrap()).unwrap();
+                match email.auth_login(&user, &pass){
+                    Ok(_) => stream.write(StatusCodes::AuthenticationSuceeded, "2.7.0 Authentication successful\r\n".into())?,
+                    Err(e) => stream.write(StatusCodes::AuthenticationFailed, format!("{:?}\r\n", e))?,
+                }
+                
             }
             Command::MailFrom => {
                 email.set_sender(res);

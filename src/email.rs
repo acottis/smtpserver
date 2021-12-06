@@ -125,6 +125,20 @@ impl Email{
             Err(Error::BadAuth)
         }
     }
+    /// Controls authentication for auth plain
+    /// 
+    pub fn auth_login(&mut self, user: &str, pass: &str) -> Result<()>{
+        let secrets = aml::load("config.aml");
+        let user = user.replace(&['\r','\n'][..], "").to_string();
+        let pass = pass.replace(&['\r','\n'][..], "").to_string();
+        println!("user: {}, pass: {}", user, pass);
+        if &user == secrets.get("login_user").unwrap() && &pass == secrets.get("login_pass").unwrap() {
+            self.authenticated = true;
+            Ok(())
+        }else{
+            Err(Error::BadAuth)
+        }
+    }
     /// Moves an email to a user mailbox
     /// 
     pub fn store(&self) -> Result<()>{
@@ -132,12 +146,15 @@ impl Email{
         let email = format!("{}/{}", self.mail_root, self.filename);
         let user_folder = format!("{}/mail/{}/Inbox/", &self.mail_root, user);
         
+        println!("Attempting to move Email: {}, to Folder: {} ...", &email, user_folder);
         let destination = match std::path::Path::new(&user_folder).exists() {
             true => format!("{}/{}", user_folder, &self.filename),
-            false => format!("{}/mail/{}/{}", &self.mail_root, "catch-all", &self.filename),
+            false => {
+                println!("{} does not exist... defaulting to catch-all", user_folder);
+                format!("{}/mail/{}/{}", &self.mail_root, "catch-all", &self.filename)
+            },
         };
         
-        println!("Attempting to move Email: {}, to Folder: {} ...", &email, user_folder);
         let copy = std::fs::copy(&email, &destination);
         match copy {
             Ok(_) => { 
