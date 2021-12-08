@@ -133,7 +133,8 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 stream.write(StatusCodes::Ok, "Ok\r\n".into())?;
             }
             Command::Data => {
-                if email.sender() == "" || email.domain() == "" || email.recipient() == "" { // || !email.authenticated() {
+                assert_eq!(email.recipients().len(), email.recipient_domains().len(), "There is not an equal amount of recipients and domains");
+                if email.sender() == "" || email.domain() == "" || email.recipients().is_empty() { // || !email.authenticated() {
                     stream.write(StatusCodes::BadCommandSequence, format!("EHLO/HELO, MAIL FROM: and RCPT: are required before DATA, Attempts Remaining: {}\r\n", MAX_BAD_ATTEMPTS - bad_attempts))?;
                     bad_attempts += 1;
                     continue;
@@ -158,23 +159,27 @@ fn smtp_main(stream: TcpStream) -> Result<()>{
                 }     
                 email.save_email(data).unwrap();
                 // Sends the email if its for an external addresss
-                if email.recipient_domain() != global::lookup("my_domain") {
-                    match email.send() {
-                        Ok(_) => println!("Email sent sucessfully"),
-                        Err(e) => {
-                            println!("Error: {:?}", e);
-                            stream.write(StatusCodes::AuthenticationRequired, format!("Goodbye\r\n"))?;
-                            break;
+
+                for (recipient, domain) in email.recipients().iter().zip(email.recipient_domains()) {
+                    
+                    if domain != global::lookup("my_domain") {
+                        match email.send(&recipient, &domain) {
+                            Ok(_) => println!("Email sent sucessfully"),
+                            Err(e) => {
+                                println!("Error: {:?}", e);
+                                stream.write(StatusCodes::AuthenticationRequired, format!("Goodbye\r\n"))?;
+                                break;
+                            }
+                        }
+                    } else{
+                        // Stores the email to user mailbox
+                        match email.store(&recipient) {
+                            Ok(_) => println!("Email moved sucessfully"),
+                            Err(e) => println!("Email could not be moved to folder: {:?}", e),
                         }
                     }
-                } else{
-                    // Stores the email to user mailbox
-                    match email.store() {
-                        Ok(_) => println!("Email moved sucessfully"),
-                        Err(e) => println!("Email could not be moved to folder: {:?}", e),
-                    }
+                    stream.write(StatusCodes::Ok, "Recieved Data\r\n".into())?;
                 }
-                stream.write(StatusCodes::Ok, "Recieved Data\r\n".into())?;
             }
             Command::Quit => {
                 stream.write(StatusCodes::ServiceClosed, "Goodbye\r\n".into())?;

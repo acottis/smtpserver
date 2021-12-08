@@ -8,10 +8,10 @@ use crate::global;
 /// 
 #[derive(Default, Debug)]
 pub struct Email{
-    domain: String,
+    sender_domain: String,
     sender: String,
-    recipient: String,
-    recipient_domain: String,
+    recipients: Vec<String>,
+    recipient_domains: Vec<String>,
     sender_ip: String,
     authenticated: bool,
     filename: String,
@@ -36,12 +36,12 @@ impl Email{
     /// 
     pub fn set_domain(&mut self, res: String){
         let tmp = res.splitn(2, " ").last().unwrap_or("");
-        self.domain = tmp.replace(&[' ', '\r','\n'][..], "");
+        self.sender_domain = tmp.replace(&[' ', '\r','\n'][..], "");
     }
     /// Getter for `self.domain`
     /// 
     pub fn domain(&self) -> String{
-        self.domain.clone()
+        self.sender_domain.clone()
     }
     /// Setter for `self.sender`
     /// 
@@ -58,18 +58,20 @@ impl Email{
     /// 
     pub fn set_recipient(&mut self, res: String){
         let tmp = res.splitn(2, ":").last().unwrap_or("");
-        self.recipient = tmp.replace(&[' ','\r','\n','<','>'][..], "");
-        self.recipient_domain = self.recipient.split("@").last().unwrap().to_string();
+        let recipient = tmp.replace(&[' ','\r','\n','<','>'][..], "");
+
+        self.recipients.push(recipient.clone());
+        self.recipient_domains.push(recipient.split("@").last().unwrap().to_string());
     }
     /// Getter for `self.recipient`
     /// 
-    pub fn recipient(&self) -> String{
-        self.recipient.clone()
+    pub fn recipients(&self) -> Vec<String>{
+        self.recipients.clone()
     }
     /// Getter for `self.recipient_domain`
     /// 
-    pub fn recipient_domain(&self) -> String{
-        self.recipient_domain.clone()
+    pub fn recipient_domains(&self) -> Vec<String>{
+        self.recipient_domains.clone()
     }
     /// Getter for `self.authenticated`
     /// 
@@ -82,7 +84,7 @@ impl Email{
         let now: DateTime<Utc> = Utc::now();
         let header = format!(
             "Received: from {from_mx} ({from_mx_ip}) by {my_mx} (AdaMPT) with {encryption} id {id}; {date_received}\r\n",
-            from_mx = self.domain,
+            from_mx = self.sender_domain,
             from_mx_ip = self.sender_ip,
             my_mx = global::lookup("hostname"),
             encryption = "SMTP",
@@ -141,8 +143,8 @@ impl Email{
     }
     /// Moves an email to a user mailbox
     /// 
-    pub fn store(&self) -> Result<()>{
-        let user = &self.recipient.split("@").next().unwrap();
+    pub fn store(&self, recipient: &str) -> Result<()>{
+        let user = &recipient.split("@").next().unwrap();
         let email = format!("{}/{}", self.mail_root, self.filename);
         let user_folder = format!("{}/mail/{}/Inbox/", &self.mail_root, user);
         
@@ -158,7 +160,7 @@ impl Email{
         let copy = std::fs::copy(&email, &destination);
         match copy {
             Ok(_) => { 
-                std::fs::remove_file(&email).map_err(|e| Error::FileDelete((e, format!("Filename: {}", &email))))?;
+                //std::fs::remove_file(&email).map_err(|e| Error::FileDelete((e, format!("Filename: {}", &email))))?;
                 return Ok(())
             },
             Err(e) => return Err(Error::FileCopy((e, format!("From: {}, To: {}", &email, &destination))))
@@ -166,7 +168,7 @@ impl Email{
     }
     /// Sends the email on if required, IP locked for now
     /// 
-    pub fn send(&self) -> Result<()>{
+    pub fn send(&self, recipient: &str, domain: &str) -> Result<()>{
         if self.sender_ip != "127.0.0.1"{
             return Err(Error::SendSecurityPolicy(format!("Bad IP: {}", self.sender_ip)))
         }
@@ -188,8 +190,8 @@ impl Email{
             config.get("forwarder_hostname").unwrap().into(), //host 
             config.get("forwarder_port").unwrap().into(), //port
             self.sender.to_owned(), //sender
-            self.recipient.to_owned(), //recipient
-            self.domain.to_owned() //domain
+            recipient.to_owned(), //recipient
+            domain.to_owned() //domain
         );
         //println!("{}", String::from_utf8(buf.clone()).unwrap());
         let send = smtp_client_builder
